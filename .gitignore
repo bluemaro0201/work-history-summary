@@ -1,0 +1,33 @@
+# Environment & secrets
+.env
+.env.example
+providers.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Tooling (oh-my-claudecode, claude)
+.omc/
+.omx/
+.claude/
+CLAUDE.MD
+
+# Internal docs
+GUIDE.md
+TOKEN_SETUP.md
+PRD.md

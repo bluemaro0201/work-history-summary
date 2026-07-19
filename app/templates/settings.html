@@ -1,0 +1,225 @@
+{% extends "base.html" %}{% block title %}토큰 설정{% endblock %}{% block content %}
+<div class="space-y-6">
+  <div class="flex justify-between items-center">
+    <div>
+      <h1 class="text-xl font-bold">토큰 설정</h1>
+      <p class="text-sm text-gray-500 mt-1">각 서비스의 API 토큰을 설정합니다. 설정값은 <code class="bg-gray-100 px-1 rounded">providers.json</code>에 저장됩니다.</p>
+    </div>
+    <a href="/" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">수집 시작 →</a>
+  </div>
+
+  <div id="providers-root" class="space-y-4"></div>
+</div>
+
+<script>
+const SOURCE_META = {
+  git: {
+    label: 'GitHub',
+    help: 'Settings → Developer settings → Personal access tokens → Classic | 권한: repo, read:user',
+    fields: [
+      { id: 'label', label: '이름',                  type: 'text',     placeholder: 'Work GitHub' },
+      { id: 'token', label: 'Personal Access Token', type: 'password', placeholder: 'ghp_xxxxxxxxxxxx' },
+    ],
+    scopeFields: [
+      { id: 'repositories', label: '저장소', placeholder: 'owner/repo1, owner/repo2 (쉼표로 구분, 비워두면 전체)' },
+    ],
+    autoFilled: ['username'],
+  },
+  slack: {
+    label: 'Slack',
+    help: 'api.slack.com → Your Apps → OAuth & Permissions → User OAuth Token',
+    guide: [
+      '1. <a href="https://api.slack.com/apps" target="_blank" class="text-blue-600 underline">api.slack.com/apps</a> 접속 → <b>Create New App</b> → <b>From scratch</b>',
+      '2. App Name 입력 (예: <code>work-summary</code>), 워크스페이스 선택 → <b>Create App</b>',
+      '3. 좌측 메뉴 <b>OAuth &amp; Permissions</b> 클릭',
+      '4. <b>User Token Scopes</b> 섹션에서 아래 권한 추가:<br>&nbsp;&nbsp;&nbsp;• <code>channels:history</code> — 채널 메시지 읽기<br>&nbsp;&nbsp;&nbsp;• <code>channels:read</code> — 채널 목록<br>&nbsp;&nbsp;&nbsp;• <code>groups:history</code> — 비공개 채널 메시지<br>&nbsp;&nbsp;&nbsp;• <code>search:read</code> — 메시지 검색<br>&nbsp;&nbsp;&nbsp;• <code>users:read</code> — 사용자 정보',
+      '5. 페이지 상단 <b>Install to Workspace</b> 클릭 → 권한 허용',
+      '6. 설치 후 <b>User OAuth Token</b> (<code>xoxp-</code> 로 시작) 복사',
+    ],
+    fields: [
+      { id: 'label', label: '이름',             type: 'text',     placeholder: 'Work Slack' },
+      { id: 'token', label: 'User OAuth Token', type: 'password', placeholder: 'xoxp-xxxxxxxxxxxx' },
+    ],
+    scopeFields: [
+      { id: 'channels', label: '채널 ID', placeholder: 'C0123456, C9876543 (쉼표로 구분, 비워두면 전체 검색)' },
+    ],
+    autoFilled: ['user_id', 'workspace'],
+  },
+  jira: {
+    label: 'Jira',
+    help: 'id.atlassian.com/manage-profile/security/api-tokens',
+    fields: [
+      { id: 'label',    label: '이름',      type: 'text',     placeholder: 'Company Jira' },
+      { id: 'site_url', label: '사이트 URL', type: 'text',     placeholder: 'https://company.atlassian.net' },
+      { id: 'email',    label: '이메일',     type: 'email',    placeholder: 'you@example.com' },
+      { id: 'token',    label: 'API 토큰',   type: 'password', placeholder: 'your-api-token' },
+    ],
+    scopeFields: [
+      { id: 'projects', label: '프로젝트 키', placeholder: 'MFP, DEV (쉼표로 구분, 비워두면 전체)' },
+    ],
+    autoFilled: ['account_id'],
+  },
+  confluence: {
+    label: 'Confluence',
+    help: 'Jira와 같은 인스턴스라면 동일한 토큰/이메일을 사용, Account ID는 자동으로 가져옵니다',
+    fields: [
+      { id: 'label',    label: '이름',      type: 'text',     placeholder: 'Company Confluence' },
+      { id: 'site_url', label: '사이트 URL', type: 'text',     placeholder: 'https://company.atlassian.net' },
+      { id: 'email',    label: '이메일',     type: 'email',    placeholder: 'you@example.com' },
+      { id: 'token',    label: 'API 토큰',   type: 'password', placeholder: 'your-api-token' },
+    ],
+    scopeFields: [
+      { id: 'spaces', label: '스페이스 키', placeholder: 'TEAM, DEV (쉼표로 구분, 비워두면 전체)' },
+    ],
+    autoFilled: ['account_id'],
+  },
+};
+
+let data = {};
+let openForm = null; // { source, id } or null
+
+async function load() {
+  const res = await fetch('/api/providers');
+  data = await res.json();
+  render();
+}
+
+function render() {
+  document.getElementById('providers-root').innerHTML =
+    Object.entries(SOURCE_META).map(([src, meta]) => renderSection(src, meta)).join('');
+}
+
+function renderSection(src, meta) {
+  const items = data[src] || [];
+  const guideHtml = meta.guide ? `
+    <details class="mt-1">
+      <summary class="text-xs text-blue-500 cursor-pointer hover:underline select-none">설정 가이드 보기</summary>
+      <ol class="mt-2 space-y-1.5 text-xs text-gray-600 bg-blue-50 rounded p-3">
+        ${meta.guide.map(s => `<li>${s}</li>`).join('')}
+      </ol>
+    </details>` : '';
+  return `
+    <div class="bg-white rounded border overflow-hidden">
+      <div class="flex items-start justify-between px-5 py-4 border-b bg-gray-50">
+        <div>
+          <span class="font-semibold">${meta.label}</span>
+          <p class="text-xs text-gray-400 mt-0.5">${meta.help}</p>
+          ${guideHtml}
+        </div>
+        <button onclick="openAdd('${src}')" class="text-sm text-blue-600 hover:underline whitespace-nowrap ml-4 mt-0.5">+ 추가</button>
+      </div>
+      <div>
+        ${items.length === 0
+          ? '<p class="px-5 py-4 text-sm text-gray-400">설정된 계정이 없습니다.</p>'
+          : items.map(p => renderRow(src, p)).join('')}
+      </div>
+      <div id="form-${src}" class="${openForm?.source === src ? '' : 'hidden'} border-t bg-gray-50 p-5">
+        ${openForm?.source === src ? renderForm(src, openForm.id) : ''}
+      </div>
+    </div>`;
+}
+
+function renderRow(src, p) {
+  const sub = p.site_url || p.username || p.user_id || '';
+  const scopeKey = { git: 'repositories', slack: 'channels', jira: 'projects', confluence: 'spaces' }[src];
+  const scope = scopeKey && p[scopeKey] ? p[scopeKey] : '';
+  return `
+    <div class="flex items-center justify-between px-5 py-3 border-b last:border-b-0">
+      <div class="min-w-0">
+        <span class="font-medium text-sm">${esc(p.label || SOURCE_META[src].label)}</span>
+        ${sub ? `<span class="ml-2 text-xs text-gray-400">${esc(sub)}</span>` : ''}
+        ${scope ? `<span class="ml-2 text-xs text-blue-400">${esc(scope)}</span>` : ''}
+      </div>
+      <div class="flex gap-2 ml-4 shrink-0">
+        <button onclick="openEdit('${src}','${p.id}')" class="text-xs text-gray-500 border px-2 py-1 rounded hover:bg-gray-100">편집</button>
+        <button onclick="del('${src}','${p.id}')" class="text-xs text-red-500 border border-red-200 px-2 py-1 rounded hover:bg-red-50">삭제</button>
+      </div>
+    </div>`;
+}
+
+function renderForm(src, id) {
+  const meta = SOURCE_META[src];
+  const existing = id ? (data[src] || []).find(p => p.id === id) : null;
+  const cols = meta.fields.length <= 2 ? 'grid-cols-1' : 'grid-cols-2';
+  const inputs = meta.fields.map(f => `
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">${f.label}</span>
+      <input id="f-${src}-${f.id}" type="${f.type}" placeholder="${esc(f.placeholder)}"
+             value="${esc(existing?.[f.id] || '')}"
+             class="border p-2 rounded w-full mt-1 text-sm ${f.type === 'password' ? 'font-mono' : ''}">
+    </label>`).join('');
+  const scopeInputs = (meta.scopeFields || []).map(f => `
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">${f.label}</span>
+      <input id="f-${src}-${f.id}" type="text" placeholder="${esc(f.placeholder)}"
+             value="${esc(existing?.[f.id] || '')}"
+             class="border p-2 rounded w-full mt-1 text-sm">
+    </label>`).join('');
+  return `
+    <div class="space-y-4">
+      <div class="grid ${cols} gap-3">${inputs}</div>
+      ${scopeInputs ? `
+        <div class="border-t pt-3">
+          <p class="text-xs text-gray-400 mb-2">수집 범위 (선택사항 — 비워두면 전체)</p>
+          ${scopeInputs}
+        </div>` : ''}
+      <div class="flex items-center gap-2">
+        <button id="savebtn-${src}" onclick="save('${src}','${id || ''}')" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50">${id ? '수정' : '저장'}</button>
+        <button onclick="closeForm()" class="text-sm text-gray-500 hover:underline">취소</button>
+        <span id="ferr-${src}" class="text-sm text-red-500 hidden"></span>
+      </div>
+    </div>`;
+}
+
+function openAdd(src) { openForm = { source: src, id: null }; render(); focusFirst(src); }
+function openEdit(src, id) { openForm = { source: src, id }; render(); focusFirst(src); }
+function closeForm() { openForm = null; render(); }
+
+function focusFirst(src) {
+  setTimeout(() => document.getElementById(`f-${src}-${SOURCE_META[src].fields[0].id}`)?.focus(), 30);
+}
+
+async function save(src, id) {
+  const meta = SOURCE_META[src];
+  const payload = {};
+  for (const f of [...meta.fields, ...(meta.scopeFields || [])]) {
+    payload[f.id] = document.getElementById(`f-${src}-${f.id}`)?.value?.trim() || '';
+  }
+  if (!payload.label) payload.label = meta.label;
+
+  const errEl = document.getElementById(`ferr-${src}`);
+  errEl.classList.add('hidden');
+  const btn = document.getElementById(`savebtn-${src}`);
+  if (btn) { btn.disabled = true; btn.textContent = '검증 중...'; }
+
+  const isEdit = !!id;
+  const url = isEdit ? `/api/providers/${src}/${id}` : `/api/providers/${src}`;
+  const res = await fetch(url, {
+    method: isEdit ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (btn) { btn.disabled = false; btn.textContent = isEdit ? '수정' : '저장'; }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    errEl.textContent = err.detail || '저장 실패'; errEl.classList.remove('hidden'); return;
+  }
+  openForm = null;
+  load();
+}
+
+async function del(src, id) {
+  if (!confirm('삭제하시겠습니까?')) return;
+  await fetch(`/api/providers/${src}/${id}`, { method: 'DELETE' });
+  load();
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+load();
+</script>
+{% endblock %}

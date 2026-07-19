@@ -1,0 +1,172 @@
+{% extends "base.html" %}{% block title %}작업 요약{% endblock %}{% block content %}
+<div class="space-y-6">
+
+  <!-- 온보딩: 토큰 미설정 -->
+  <div id="onboarding" class="hidden bg-blue-50 border border-blue-200 rounded p-8 text-center">
+    <p class="text-blue-800 font-semibold text-lg mb-2">먼저 토큰을 설정해주세요</p>
+    <p class="text-blue-600 text-sm mb-5">GitHub, Slack, Jira, Confluence 중 사용할 서비스의 API 토큰을 입력하면 수집을 시작할 수 있습니다.</p>
+    <a href="/settings" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">토큰 설정하기 →</a>
+  </div>
+
+  <!-- 수집 폼 -->
+  <div id="form-section" class="hidden bg-white p-6 rounded border space-y-5">
+    <h1 class="text-xl font-bold">작업 요약 생성</h1>
+
+    <div class="flex gap-4">
+      <label class="flex-1">
+        <span class="text-sm font-medium">날짜</span>
+        <input id="date-input" class="border p-2 rounded block w-full mt-1" type="date">
+      </label>
+      <label class="flex-1">
+        <span class="text-sm font-medium">시간대</span>
+        <select id="tz-input" class="border p-2 rounded block w-full mt-1">
+          <option value="Asia/Seoul">Asia/Seoul (KST)</option>
+          <option value="UTC">UTC</option>
+          <option value="America/New_York">America/New_York (EST)</option>
+          <option value="America/Los_Angeles">America/Los_Angeles (PST)</option>
+          <option value="Europe/London">Europe/London (GMT)</option>
+        </select>
+      </label>
+    </div>
+
+    <div>
+      <span class="text-sm font-medium block mb-3">수집 소스 <a href="/settings" class="text-xs text-blue-500 hover:underline ml-1">계정 / 범위 설정</a></span>
+      <div id="provider-list" class="space-y-2"></div>
+    </div>
+
+    <p id="form-error" class="text-red-500 text-sm hidden"></p>
+    <button onclick="collect()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">수집 및 프롬프트 생성</button>
+  </div>
+
+  <!-- 로딩 -->
+  <div id="loading-section" class="hidden bg-white p-12 rounded border text-center">
+    <div class="text-gray-400 text-sm animate-pulse">데이터 수집 중...</div>
+  </div>
+
+  <!-- 결과 -->
+  <div id="result-section" class="hidden space-y-4">
+    <div class="bg-white p-4 rounded border">
+      <div class="flex justify-between items-center mb-2">
+        <span class="font-medium">Claude / ChatGPT에 붙여넣기용 프롬프트</span>
+        <div class="flex items-center gap-3">
+          <span id="status-text" class="text-xs text-gray-400"></span>
+          <button onclick="copyPrompt(event)" class="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">복사</button>
+        </div>
+      </div>
+      <textarea id="prompt-output" class="w-full h-[32rem] text-xs font-mono border rounded p-2 bg-gray-50 resize-y" readonly></textarea>
+      <p id="prompt-len" class="text-xs text-gray-400 mt-1 text-right"></p>
+    </div>
+    <button onclick="showForm()" class="text-sm text-gray-500 hover:underline">← 다시 생성</button>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('date-input').value = new Date().toISOString().slice(0, 10);
+
+  const SRC_LABELS = { git: 'GitHub', slack: 'Slack', jira: 'Jira', confluence: 'Confluence' };
+  const SRC_OPTS = {
+    git:        { key: 'repositories', label: '저장소',      placeholder: 'owner/repo, 쉼표로 구분' },
+    slack:      { key: 'channels',     label: '채널 ID',     placeholder: '비워두면 전체 검색, 쉼표로 구분' },
+    jira:       { key: 'projects',     label: '프로젝트 키',  placeholder: 'MFP, DEV, 쉼표로 구분' },
+    confluence: { key: 'spaces',       label: '스페이스 키',  placeholder: '비워두면 전체 검색, 쉼표로 구분' },
+  };
+
+  let allProviders = {};
+
+  async function init() {
+    const res = await fetch('/api/providers');
+    allProviders = await res.json();
+    const hasAny = Object.values(allProviders).some(a => a.length > 0);
+    if (!hasAny) {
+      document.getElementById('onboarding').classList.remove('hidden');
+      return;
+    }
+    renderProviderList();
+    document.getElementById('form-section').classList.remove('hidden');
+  }
+
+  function renderProviderList() {
+    const container = document.getElementById('provider-list');
+    const rows = [];
+    const SCOPE_KEY = { git: 'repositories', slack: 'channels', jira: 'projects', confluence: 'spaces' };
+    for (const [src, items] of Object.entries(allProviders)) {
+      for (const p of items) {
+        const sub = p.site_url || p.username || p.user_id || '';
+        const scopeVal = p[SCOPE_KEY[src]] || '';
+        rows.push(`
+          <div class="border rounded p-3">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="provider-check" data-id="${p.id}" data-source="${src}">
+              <span class="font-medium text-sm">${esc(p.label || SRC_LABELS[src])}</span>
+              <span class="text-xs text-gray-400">${esc(SRC_LABELS[src])}${sub ? ' · ' + esc(sub) : ''}</span>
+              ${scopeVal ? `<span class="text-xs text-blue-400 ml-1">${esc(scopeVal)}</span>` : ''}
+            </label>
+          </div>`);
+      }
+    }
+    container.innerHTML = rows.length
+      ? rows.join('')
+      : '<p class="text-sm text-gray-400">설정된 계정이 없습니다. <a href="/settings" class="text-blue-500 hover:underline">토큰 설정</a>에서 추가해주세요.</p>';
+  }
+
+  async function collect() {
+    const errorEl = document.getElementById('form-error');
+    errorEl.classList.add('hidden');
+
+    const checked = [...document.querySelectorAll('.provider-check:checked')];
+    if (!checked.length) {
+      errorEl.textContent = '하나 이상의 소스를 선택해주세요.'; errorEl.classList.remove('hidden'); return;
+    }
+
+    const selections = checked.map(c => ({ provider_id: c.dataset.id, source: c.dataset.source, enabled: true }));
+
+    document.getElementById('form-section').classList.add('hidden');
+    document.getElementById('loading-section').classList.remove('hidden');
+
+    try {
+      const res = await fetch('/api/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: document.getElementById('date-input').value,
+          timezone: document.getElementById('tz-input').value,
+          selections,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `서버 오류 (${res.status})`);
+
+      const data = await res.json();
+      document.getElementById('prompt-output').value = data.prompt;
+      const chars = data.prompt.length;
+      document.getElementById('prompt-len').textContent = `${chars.toLocaleString()}자 (약 ${Math.round(chars/4).toLocaleString()} 토큰 추정)${chars > 80000 ? ' — Claude에 붙여넣기 전 일부 소스 범위를 좁혀보세요.' : ''}`;
+      document.getElementById('status-text').textContent = (data.source_status || [])
+        .map(s => `${s.label}(${s.source}): ${s.status}${s.count != null ? ` ${s.count}건` : ''}`)
+        .join(' | ');
+
+      document.getElementById('loading-section').classList.add('hidden');
+      document.getElementById('result-section').classList.remove('hidden');
+    } catch (err) {
+      document.getElementById('loading-section').classList.add('hidden');
+      document.getElementById('form-section').classList.remove('hidden');
+      errorEl.textContent = '오류: ' + err.message; errorEl.classList.remove('hidden');
+    }
+  }
+
+  function copyPrompt(event) {
+    navigator.clipboard.writeText(document.getElementById('prompt-output').value).then(() => {
+      event.target.textContent = '복사됨!';
+      setTimeout(() => event.target.textContent = '복사', 1500);
+    });
+  }
+
+  function showForm() {
+    document.getElementById('result-section').classList.add('hidden');
+    document.getElementById('form-section').classList.remove('hidden');
+  }
+
+  function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  init();
+</script>
+{% endblock %}
