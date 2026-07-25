@@ -308,10 +308,27 @@
   }
 
   function copyPrompt(event) {
-    navigator.clipboard.writeText(document.getElementById('prompt-output').value).then(() => {
+    const textarea = document.getElementById('prompt-output');
+    const showCopied = () => {
       event.target.textContent = '복사됨!';
       setTimeout(() => event.target.textContent = '복사', 1500);
-    });
+    };
+    const fallbackCopy = () => {
+      textarea.removeAttribute('readonly');
+      textarea.focus();
+      textarea.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      textarea.setAttribute('readonly', '');
+      if (ok) showCopied();
+      else alert('복사에 실패했습니다. 텍스트를 직접 선택해서 복사해주세요.');
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(textarea.value).then(showCopied).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
   }
 
   function showForm() {
