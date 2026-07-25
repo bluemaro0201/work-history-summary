@@ -41,11 +41,8 @@ class PromptResponse(BaseModel):
     prompt: str
 
 
-@router.post("/collect", response_model=CollectResponse)
-async def collect(body: CollectRequest) -> CollectResponse:
-    if not body.date:
-        raise HTTPException(status_code=400, detail="날짜를 입력해주세요.")
-
+async def collect_activities(date: str, timezone: str, selections: list[ProviderSelection]) -> tuple[list[dict], list[dict]]:
+    """Shared by the /api/collect endpoint and the work-summary skill's CLI script."""
     s = get_settings()
     all_providers = prov.get_all()
     provider_lookup = {p["id"]: {"source": src, **p} for src, items in all_providers.items() for p in items}
@@ -53,7 +50,7 @@ async def collect(body: CollectRequest) -> CollectResponse:
     activities: list[dict] = []
     source_status: list[dict] = []
 
-    for sel in body.selections:
+    for sel in selections:
         if not sel.enabled:
             continue
 
@@ -77,7 +74,7 @@ async def collect(body: CollectRequest) -> CollectResponse:
 
         try:
             fetched = await asyncio.wait_for(
-                collector.fetch(body.date, body.timezone, identity, token, options),
+                collector.fetch(date, timezone, identity, token, options),
                 timeout=s.collector_timeout_seconds,
             )
             activities.extend(fetched)
@@ -88,13 +85,26 @@ async def collect(body: CollectRequest) -> CollectResponse:
             logger.error("[%s/%s] collection failed: %s", source, p.get("label"), exc, exc_info=True)
             source_status.append({"label": p.get("label", source), "source": source, "status": "failed", "error": str(exc), "count": 0})
 
+    return activities, source_status
+
+
+def build_prompt_text(date: str, timezone: str, activities: list[dict]) -> str:
+    """Shared by the /api/prompt endpoint and the work-summary skill's CLI script."""
+    user_msg = build_user_message(date, timezone, activities)
+    return f"[System]\n{SYSTEM_PROMPT}\n\n[User]\n{user_msg}"
+
+
+@router.post("/collect", response_model=CollectResponse)
+async def collect(body: CollectRequest) -> CollectResponse:
+    if not body.date:
+        raise HTTPException(status_code=400, detail="날짜를 입력해주세요.")
+    activities, source_status = await collect_activities(body.date, body.timezone, body.selections)
     return CollectResponse(activities=activities, source_status=source_status)
 
 
 @router.post("/prompt", response_model=PromptResponse)
 async def build_prompt(body: PromptRequest) -> PromptResponse:
-    user_msg = build_user_message(body.date, body.timezone, body.activities)
-    return PromptResponse(prompt=f"[System]\n{SYSTEM_PROMPT}\n\n[User]\n{user_msg}")
+    return PromptResponse(prompt=build_prompt_text(body.date, body.timezone, body.activities))
 
 
 def _build_identity(p: dict, source: str) -> dict:

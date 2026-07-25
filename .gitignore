@@ -21,10 +21,12 @@ dist/
 # OS
 .DS_Store
 
-# Tooling (oh-my-claudecode, claude)
+# Tooling (oh-my-claudecode, claude) — keep local settings/state out, but
+# share project-level skills (.claude/skills/) with anyone who clones the repo
 .omc/
 .omx/
-.claude/
+.claude/*
+!.claude/skills/
 CLAUDE.MD
 
 # Internal docs
