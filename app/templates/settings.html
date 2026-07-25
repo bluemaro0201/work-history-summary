@@ -14,14 +14,26 @@
 <script>
 const SOURCE_META = {
   git: {
-    label: 'GitHub',
-    help: 'Settings → Developer settings → Personal access tokens → Classic | 권한: repo, read:user',
+    label: 'Git (GitHub / GitLab / Bitbucket)',
+    help: '호스트 유형을 먼저 선택한 뒤, 해당 서비스의 토큰을 입력하세요.',
+    guide: [
+      '<b>GitHub / GitHub Enterprise</b>: Settings → Developer settings → Personal access tokens → Classic, 권한 <code>repo</code>, <code>read:user</code>. Enterprise는 API Base URL에 <code>https://github.company.com/api/v3</code> 형식으로 입력.',
+      '<b>GitLab</b>: User Settings → Access Tokens에서 <code>read_api</code> 스코프로 발급. Self-hosted라면 API Base URL에 <code>https://gitlab.company.com/api/v4</code> 입력.',
+      '<b>Bitbucket Cloud</b>: Workspace settings → Access Tokens(또는 Personal API tokens)에서 <code>repository:read</code>, <code>pullrequest:read</code> 권한으로 발급 (App Password 방식은 지원하지 않음).',
+    ],
     fields: [
-      { id: 'label', label: '이름',                  type: 'text',     placeholder: 'Work GitHub' },
-      { id: 'token', label: 'Personal Access Token', type: 'password', placeholder: 'ghp_xxxxxxxxxxxx' },
+      { id: 'label', label: '이름', type: 'text', placeholder: 'Work GitHub' },
+      { id: 'host_type', label: '호스트 유형', type: 'select', options: [
+          { value: 'github', label: 'GitHub.com' },
+          { value: 'github_enterprise', label: 'GitHub Enterprise' },
+          { value: 'gitlab', label: 'GitLab' },
+          { value: 'bitbucket', label: 'Bitbucket Cloud' },
+        ] },
+      { id: 'base_url', label: 'API Base URL (Enterprise/Self-hosted만)', type: 'text', placeholder: '예: https://github.company.com/api/v3' },
+      { id: 'token', label: '토큰', type: 'password', placeholder: 'ghp_... / glpat-... / access token' },
     ],
     scopeFields: [
-      { id: 'repositories', label: '저장소', placeholder: 'owner/repo1, owner/repo2 (쉼표로 구분, 비워두면 전체)' },
+      { id: 'repositories', label: '저장소', placeholder: 'owner/repo1, workspace/repo2 (쉼표로 구분, 비워두면 전체)' },
     ],
     autoFilled: ['username'],
   },
@@ -119,14 +131,18 @@ function renderSection(src, meta) {
     </div>`;
 }
 
+const GIT_HOST_LABELS = { github: 'GitHub', github_enterprise: 'GitHub EE', gitlab: 'GitLab', bitbucket: 'Bitbucket' };
+
 function renderRow(src, p) {
   const sub = p.site_url || p.username || p.user_id || '';
   const scopeKey = { git: 'repositories', slack: 'channels', jira: 'projects', confluence: 'spaces' }[src];
   const scope = scopeKey && p[scopeKey] ? p[scopeKey] : '';
+  const hostBadge = src === 'git' ? `<span class="ml-2 text-xs text-purple-500">${esc(GIT_HOST_LABELS[p.host_type] || 'GitHub')}</span>` : '';
   return `
     <div class="flex items-center justify-between px-5 py-3 border-b last:border-b-0">
       <div class="min-w-0">
         <span class="font-medium text-sm">${esc(p.label || SOURCE_META[src].label)}</span>
+        ${hostBadge}
         ${sub ? `<span class="ml-2 text-xs text-gray-400">${esc(sub)}</span>` : ''}
         ${scope ? `<span class="ml-2 text-xs text-blue-400">${esc(scope)}</span>` : ''}
       </div>
@@ -141,13 +157,25 @@ function renderForm(src, id) {
   const meta = SOURCE_META[src];
   const existing = id ? (data[src] || []).find(p => p.id === id) : null;
   const cols = meta.fields.length <= 2 ? 'grid-cols-1' : 'grid-cols-2';
-  const inputs = meta.fields.map(f => `
+  const inputs = meta.fields.map(f => {
+    if (f.type === 'select') {
+      const current = existing?.[f.id] || f.options[0].value;
+      return `
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">${f.label}</span>
+      <select id="f-${src}-${f.id}" class="border p-2 rounded w-full mt-1 text-sm bg-white">
+        ${f.options.map(o => `<option value="${o.value}" ${o.value === current ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </label>`;
+    }
+    return `
     <label class="block">
       <span class="text-xs font-medium text-gray-600">${f.label}</span>
       <input id="f-${src}-${f.id}" type="${f.type}" placeholder="${esc(f.placeholder)}"
              value="${esc(existing?.[f.id] || '')}"
              class="border p-2 rounded w-full mt-1 text-sm ${f.type === 'password' ? 'font-mono' : ''}">
-    </label>`).join('');
+    </label>`;
+  }).join('');
   const scopeInputs = (meta.scopeFields || []).map(f => `
     <label class="block">
       <span class="text-xs font-medium text-gray-600">${f.label}</span>

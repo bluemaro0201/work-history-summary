@@ -40,7 +40,26 @@
 
   <!-- 로딩 -->
   <div id="loading-section" class="hidden bg-white p-12 rounded border text-center">
-    <div class="text-gray-400 text-sm animate-pulse">데이터 수집 중...</div>
+    <div class="text-gray-400 text-sm animate-pulse" id="loading-text">데이터 수집 중...</div>
+  </div>
+
+  <!-- 활동 선택 -->
+  <div id="select-section" class="hidden bg-white p-4 rounded border space-y-4">
+    <div>
+      <div class="flex justify-between items-center">
+        <span class="font-medium">수집된 활동 중 프롬프트에 포함할 항목을 선택하세요 (<span id="select-count"></span>)</span>
+        <div class="flex gap-3">
+          <button onclick="toggleAll(true)" class="text-xs text-blue-600 hover:underline">전체 선택</button>
+          <button onclick="toggleAll(false)" class="text-xs text-gray-500 hover:underline">전체 해제</button>
+        </div>
+      </div>
+      <p id="select-status" class="text-xs text-gray-400 mt-1"></p>
+    </div>
+    <div id="activity-list" class="space-y-4 max-h-[28rem] overflow-y-auto"></div>
+    <div class="flex items-center gap-3 pt-3 border-t">
+      <button onclick="buildPrompt()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">선택 항목으로 프롬프트 생성</button>
+      <button onclick="showForm()" class="text-sm text-gray-500 hover:underline">← 다시 수집</button>
+    </div>
   </div>
 
   <!-- 결과 -->
@@ -48,15 +67,12 @@
     <div class="bg-white p-4 rounded border">
       <div class="flex justify-between items-center mb-2">
         <span class="font-medium">Claude / ChatGPT에 붙여넣기용 프롬프트</span>
-        <div class="flex items-center gap-3">
-          <span id="status-text" class="text-xs text-gray-400"></span>
-          <button onclick="copyPrompt(event)" class="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">복사</button>
-        </div>
+        <button onclick="copyPrompt(event)" class="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">복사</button>
       </div>
       <textarea id="prompt-output" class="w-full h-[32rem] text-xs font-mono border rounded p-2 bg-gray-50 resize-y" readonly></textarea>
       <p id="prompt-len" class="text-xs text-gray-400 mt-1 text-right"></p>
     </div>
-    <button onclick="showForm()" class="text-sm text-gray-500 hover:underline">← 다시 생성</button>
+    <button onclick="backToSelect()" class="text-sm text-gray-500 hover:underline">← 항목 다시 선택</button>
   </div>
 
 </div>
@@ -73,6 +89,7 @@
   };
 
   let allProviders = {};
+  let collectedActivities = [];
 
   async function init() {
     const res = await fetch('/api/providers');
@@ -110,6 +127,8 @@
       : '<p class="text-sm text-gray-400">설정된 계정이 없습니다. <a href="/settings" class="text-blue-500 hover:underline">토큰 설정</a>에서 추가해주세요.</p>';
   }
 
+  const ACT_SRC_LABELS = { git: 'Git', slack: 'Slack', jira: 'Jira', confluence: 'Confluence' };
+
   async function collect() {
     const errorEl = document.getElementById('form-error');
     errorEl.classList.add('hidden');
@@ -122,6 +141,7 @@
     const selections = checked.map(c => ({ provider_id: c.dataset.id, source: c.dataset.source, enabled: true }));
 
     document.getElementById('form-section').classList.add('hidden');
+    document.getElementById('loading-text').textContent = '데이터 수집 중...';
     document.getElementById('loading-section').classList.remove('hidden');
 
     try {
@@ -137,19 +157,87 @@
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `서버 오류 (${res.status})`);
 
       const data = await res.json();
-      document.getElementById('prompt-output').value = data.prompt;
-      const chars = data.prompt.length;
-      document.getElementById('prompt-len').textContent = `${chars.toLocaleString()}자 (약 ${Math.round(chars/4).toLocaleString()} 토큰 추정)${chars > 80000 ? ' — Claude에 붙여넣기 전 일부 소스 범위를 좁혀보세요.' : ''}`;
-      document.getElementById('status-text').textContent = (data.source_status || [])
+      collectedActivities = data.activities || [];
+      document.getElementById('select-status').textContent = (data.source_status || [])
         .map(s => `${s.label}(${s.source}): ${s.status}${s.count != null ? ` ${s.count}건` : ''}`)
         .join(' | ');
+
+      renderActivityList();
+      document.getElementById('loading-section').classList.add('hidden');
+      document.getElementById('select-section').classList.remove('hidden');
+    } catch (err) {
+      document.getElementById('loading-section').classList.add('hidden');
+      document.getElementById('form-section').classList.remove('hidden');
+      errorEl.textContent = '오류: ' + err.message; errorEl.classList.remove('hidden');
+    }
+  }
+
+  function renderActivityList() {
+    const bySource = {};
+    collectedActivities.forEach((a, idx) => { (bySource[a.source] ||= []).push({ ...a, _idx: idx }); });
+
+    const html = Object.entries(bySource).map(([src, items]) => `
+      <div>
+        <p class="text-xs font-semibold text-gray-500 mb-1.5">${esc(ACT_SRC_LABELS[src] || src)} (${items.length}건)</p>
+        <div class="space-y-1">
+          ${items.map(a => `
+            <label class="flex items-start gap-2 text-sm border rounded p-2 cursor-pointer hover:bg-gray-50">
+              <input type="checkbox" class="activity-check mt-0.5" data-idx="${a._idx}" checked onchange="updateSelectCount()">
+              <span class="min-w-0">
+                <span class="font-medium">${a.issue_key ? `[${esc(a.issue_key)}] ` : ''}${esc(a.title || '(내용 없음)')}</span>
+                <span class="text-gray-400 text-xs block">${esc(a.activity_type || '')}${a.activity_ts ? ' · ' + esc(String(a.activity_ts).replace('T', ' ').slice(0, 16)) : ''}${a.project ? ' · ' + esc(a.project) : ''}</span>
+              </span>
+            </label>`).join('')}
+        </div>
+      </div>`).join('');
+
+    document.getElementById('activity-list').innerHTML = html || '<p class="text-sm text-gray-400">수집된 활동이 없습니다.</p>';
+    updateSelectCount();
+  }
+
+  function toggleAll(checked) {
+    document.querySelectorAll('.activity-check').forEach(el => el.checked = checked);
+    updateSelectCount();
+  }
+
+  function updateSelectCount() {
+    const total = document.querySelectorAll('.activity-check').length;
+    const checked = document.querySelectorAll('.activity-check:checked').length;
+    document.getElementById('select-count').textContent = `${checked} / ${total} 선택됨`;
+  }
+
+  async function buildPrompt() {
+    const idxs = [...document.querySelectorAll('.activity-check:checked')].map(el => Number(el.dataset.idx));
+    if (!idxs.length) { alert('하나 이상의 활동을 선택해주세요.'); return; }
+    const selected = idxs.map(i => collectedActivities[i]);
+
+    document.getElementById('select-section').classList.add('hidden');
+    document.getElementById('loading-text').textContent = '프롬프트 생성 중...';
+    document.getElementById('loading-section').classList.remove('hidden');
+
+    try {
+      const res = await fetch('/api/prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: document.getElementById('date-input').value,
+          timezone: document.getElementById('tz-input').value,
+          activities: selected,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `서버 오류 (${res.status})`);
+
+      const data = await res.json();
+      document.getElementById('prompt-output').value = data.prompt;
+      const chars = data.prompt.length;
+      document.getElementById('prompt-len').textContent = `${chars.toLocaleString()}자 (약 ${Math.round(chars/4).toLocaleString()} 토큰 추정)${chars > 80000 ? ' — 항목을 더 줄여보세요.' : ''}`;
 
       document.getElementById('loading-section').classList.add('hidden');
       document.getElementById('result-section').classList.remove('hidden');
     } catch (err) {
       document.getElementById('loading-section').classList.add('hidden');
-      document.getElementById('form-section').classList.remove('hidden');
-      errorEl.textContent = '오류: ' + err.message; errorEl.classList.remove('hidden');
+      document.getElementById('select-section').classList.remove('hidden');
+      alert('오류: ' + err.message);
     }
   }
 
@@ -161,8 +249,14 @@
   }
 
   function showForm() {
+    document.getElementById('select-section').classList.add('hidden');
     document.getElementById('result-section').classList.add('hidden');
     document.getElementById('form-section').classList.remove('hidden');
+  }
+
+  function backToSelect() {
+    document.getElementById('result-section').classList.add('hidden');
+    document.getElementById('select-section').classList.remove('hidden');
   }
 
   function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

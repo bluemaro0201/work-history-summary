@@ -27,8 +27,18 @@ class CollectRequest(BaseModel):
 
 
 class CollectResponse(BaseModel):
-    prompt: str
+    activities: list[dict]
     source_status: list[dict]
+
+
+class PromptRequest(BaseModel):
+    date: str
+    timezone: str = "Asia/Seoul"
+    activities: list[dict] = []
+
+
+class PromptResponse(BaseModel):
+    prompt: str
 
 
 @router.post("/collect", response_model=CollectResponse)
@@ -78,11 +88,13 @@ async def collect(body: CollectRequest) -> CollectResponse:
             logger.error("[%s/%s] collection failed: %s", source, p.get("label"), exc, exc_info=True)
             source_status.append({"label": p.get("label", source), "source": source, "status": "failed", "error": str(exc), "count": 0})
 
-    user_msg = build_user_message(body.date, body.timezone, activities)
-    return CollectResponse(
-        prompt=f"[System]\n{SYSTEM_PROMPT}\n\n[User]\n{user_msg}",
-        source_status=source_status,
-    )
+    return CollectResponse(activities=activities, source_status=source_status)
+
+
+@router.post("/prompt", response_model=PromptResponse)
+async def build_prompt(body: PromptRequest) -> PromptResponse:
+    user_msg = build_user_message(body.date, body.timezone, body.activities)
+    return PromptResponse(prompt=f"[System]\n{SYSTEM_PROMPT}\n\n[User]\n{user_msg}")
 
 
 def _build_identity(p: dict, source: str) -> dict:
@@ -90,6 +102,8 @@ def _build_identity(p: dict, source: str) -> dict:
     is_cloud = ("atlassian.net" in site_url) if site_url else True
     return {
         "github_login": p.get("username", ""),
+        "git_username": p.get("username", ""),
+        "git_account_id": p.get("account_id", "") if source == "git" else "",
         "slack_user_id": p.get("user_id", ""),
         "jira_account_id": p.get("account_id", "") if source == "jira" else "",
         "confluence_account_id": p.get("account_id", "") if source == "confluence" else "",
@@ -107,8 +121,12 @@ def _build_options(p: dict, source: str) -> dict:
     opts: dict = {}
     if source in ("jira", "confluence"):
         opts["site_url"] = p.get("site_url", "")
-    if source == "git" and p.get("repositories"):
-        opts["repositories"] = to_list(p["repositories"])
+    if source == "git":
+        opts["host_type"] = p.get("host_type", "github")
+        if p.get("base_url"):
+            opts["base_url"] = p["base_url"]
+        if p.get("repositories"):
+            opts["repositories"] = to_list(p["repositories"])
     elif source == "slack" and p.get("channels"):
         opts["channels"] = to_list(p["channels"])
     elif source == "jira" and p.get("projects"):

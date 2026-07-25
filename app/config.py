@@ -9,10 +9,9 @@ class Settings(BaseSettings):
     app_debug: bool = True
 
     collector_timeout_seconds: int = 30
-    collector_max_activities_per_source: int = 100
 
 
-# Module-level singleton — used by collectors for timeout/max_activities.
+# Module-level singleton — used by collectors for timeout.
 settings = Settings()
 
 

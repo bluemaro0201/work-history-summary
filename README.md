@@ -2,7 +2,7 @@
 
 로컬에서 실행하는 일일 업무 요약 도구입니다.
 
-GitHub, Slack, Jira, Confluence에서 하루 활동을 수집하고, Claude / ChatGPT에 붙여넣을 수 있는 프롬프트를 생성합니다.
+Git(GitHub / GitHub Enterprise / GitLab / Bitbucket Cloud), Slack, Jira, Confluence에서 하루 활동을 수집하고, Claude / ChatGPT에 붙여넣을 수 있는 프롬프트를 생성합니다.
 
 - AI API 키 불필요 — 프롬프트 생성까지만 담당
 - DB 불필요 — 토큰은 로컬 `providers.json`에 저장
@@ -48,12 +48,29 @@ open http://localhost:8000
 
 ## 토큰 설정 방법
 
-### GitHub
+### Git (GitHub / GitHub Enterprise / GitLab / Bitbucket Cloud)
 
+설정 화면에서 **호스트 유형**을 먼저 선택한 뒤, 해당 서비스 방식으로 토큰을 발급해 입력합니다.
+
+**GitHub / GitHub Enterprise**
 1. GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)**
 2. **Generate new token** 클릭
 3. 권한 선택: `repo`, `read:user`
 4. 생성된 토큰(`ghp_...`) 복사 → 설정 화면에 입력
+5. GitHub Enterprise(자체 호스팅)라면 API Base URL에 `https://github.company.com/api/v3` 형식으로 입력
+
+**GitLab** (gitlab.com 또는 self-hosted)
+1. User Settings → **Access Tokens**
+2. 스코프에서 `read_api` 선택 후 토큰 생성 (`glpat-...`)
+3. 생성된 토큰 복사 → 설정 화면에 입력
+4. Self-hosted GitLab이라면 API Base URL에 `https://gitlab.company.com/api/v4` 형식으로 입력
+
+**Bitbucket Cloud**
+1. Workspace settings → **Access Tokens** (또는 Atlassian API tokens)에서 `repository:read`, `pullrequest:read` 권한으로 토큰 생성
+2. 생성된 토큰 복사 → 설정 화면에 입력
+3. App Password 방식(Basic Auth)은 지원하지 않으며, Bearer 토큰 방식만 지원합니다
+
+> 저장소는 모든 호스트 공통으로 `owner/repo`(Bitbucket은 `workspace/repo`) 형식으로 입력합니다.
 
 ### Slack
 
@@ -86,9 +103,41 @@ open http://localhost:8000
 
 1. 브라우저에서 `http://localhost:8000` 접속
 2. 날짜 선택
-3. 수집할 소스(계정) 체크
-4. **수집 및 프롬프트 생성** 클릭
-5. 생성된 프롬프트를 복사해 Claude 또는 ChatGPT에 붙여넣기
+3. 수집할 소스(계정) 체크 후 **수집 및 프롬프트 생성** 클릭
+4. 수집된 활동 목록에서 프롬프트에 포함할 항목을 체크박스로 선택 (기본은 전체 선택, 불필요한 항목은 해제)
+5. **선택 항목으로 프롬프트 생성** 클릭 → 생성된 프롬프트를 복사해 Claude 또는 ChatGPT에 붙여넣기
+
+---
+
+## 수집 데이터 및 프롬프트 생성 방식
+
+각 서비스에서 수집한 활동은 공통 형식(`activity_type`, `title`, `content`, `url`, `activity_ts` 등)으로 정리됩니다. 별도의 AI API 호출 없이 텍스트 생성까지만 이 앱이 담당하며, 실제 요약은 사용자가 프롬프트를 복사해 Claude/ChatGPT에 붙여넣을 때 이루어집니다.
+
+수집(`POST /api/collect`)과 프롬프트 생성(`POST /api/prompt`)은 별도 단계로 분리되어 있습니다. 소스별 수집 개수에 인위적인 상한을 두지 않는 대신, 수집된 전체 활동을 화면에서 보여주고 사용자가 체크박스로 프롬프트에 포함할 항목을 직접 고릅니다 — 활동이 많은 날 프롬프트가 지나치게 길어지는 문제를 자동 절단이 아니라 사용자의 선택으로 해결하는 구조입니다.
+
+### 소스별 수집 항목
+
+| 소스 | 수집 항목 |
+|---|---|
+| **Git — GitHub / GitHub Enterprise** | 지정 레포의 커밋(메시지, SHA, URL, 시각), 오픈/머지된 PR(제목, 본문, 번호, URL), 내가 작성한 PR 리뷰 코멘트(본문, 파일 경로) |
+| **Git — GitLab** | 지정 프로젝트의 커밋(작성자 이메일로 필터링), 오픈/머지된 MR(제목, 설명, URL), 내가 작성한 MR 노트(리뷰 댓글) |
+| **Git — Bitbucket Cloud** | 지정 저장소의 커밋, 내가 작성한 PR과 그 머지 여부, 내가 작성한 PR 코멘트 |
+| **Jira** | 지정 프로젝트에서 당일 업데이트된 이슈 중 내 활동만 필터링: 필드 변경 이력(changelog), 내가 쓴 댓글, 내가 멘션된 댓글, (활동이 없으면) 담당 이슈의 상태 변경 |
+| **Confluence** | 지정 스페이스에서 당일 수정된 페이지 중: 내가 마지막으로 수정한 페이지(제목 + 본문, 옵션에 따라 HTML 원문 포함), 내가 쓴 댓글, 내가 멘션된 댓글 |
+| **Slack** | 지정 채널에서 내가 보낸 메시지, 나를 멘션한 메시지(옵션으로 끌 수 있음), 스레드 답글 |
+
+모든 항목은 커밋 메시지, PR/MR 제목, Slack 메시지 본문에서 Jira 이슈 키(`ABC-123` 형식)를 정규식으로 자동 추출해 `issue_key`로 붙입니다. 같은 이슈 키를 가진 활동은 프롬프트 상에서 함께 묶여 요약 품질을 높입니다.
+
+> Git 소스는 provider마다 저장된 `host_type`(github / github_enterprise / gitlab / bitbucket)에 따라 알맞은 수집기로 자동 라우팅됩니다. GitLab/Bitbucket은 API 특성상 "커밋 작성자"와 "PR/MR을 머지한 사람"을 100% 정확히 구분하기 어려워, 이메일·계정 ID 기준의 best-effort 매칭을 사용합니다.
+
+### 프롬프트 생성 방식
+
+1. **System 프롬프트**: "제공된 데이터만 사용", "Jira 이슈 키 기준으로 묶어서 정리", "완료한 작업 / 진행 중인 작업 / 주요 커뮤니케이션 / 결정 사항 및 특이 사항 / 내일 할 일" 5개 섹션 구조로 한국어 보고서를 작성하도록 고정된 지시문입니다.
+2. **User 메시지**: 수집된 활동을 소스별로 그룹핑하고, 각 항목을 `[이슈키] [활동유형] 제목 / 시각 / 프로젝트 / 내용(최대 400자) / URL` 형식의 불릿으로 나열합니다.
+
+최종적으로 `[System]\n...\n\n[User]\n...` 형태로 합쳐져 화면에 표시되며, 이 텍스트를 그대로 복사해 원하는 LLM에 붙여넣으면 됩니다.
+
+> **참고**: Confluence 페이지 본문/댓글은 원본이 XHTML(storage 포맷)이라, 태그를 제거하고 읽기 쉬운 텍스트로 변환한 뒤 수집합니다(멘션 감지는 변환 전 원본에서 수행하므로 정확도에 영향 없음).
 
 ---
 
@@ -100,12 +149,11 @@ docker compose up
 
 `providers.json`이 없으면 자동 생성됩니다. 컨테이너를 재시작해도 토큰 설정이 유지됩니다.
 
-포트나 수집 건수 등을 바꾸고 싶다면 `.env` 파일을 만들어 덮어쓸 수 있습니다.
+포트 등을 바꾸고 싶다면 `.env` 파일을 만들어 덮어쓸 수 있습니다.
 
 ```bash
 # .env (선택사항)
 APP_PORT=9000
-COLLECTOR_MAX_ACTIVITIES_PER_SOURCE=200
 ```
 
 ---
@@ -115,10 +163,13 @@ COLLECTOR_MAX_ACTIVITIES_PER_SOURCE=200
 ```
 app/
 ├── api/
-│   ├── collect.py        # POST /api/collect — 수집 및 프롬프트 생성
+│   ├── collect.py        # POST /api/collect — 수집 (활동 목록 반환) / POST /api/prompt — 선택된 활동으로 프롬프트 생성
 │   └── settings_api.py   # CRUD /api/providers — 토큰 관리
 ├── collectors/
-│   ├── git.py            # GitHub 커밋/PR/리뷰 수집
+│   ├── git.py            # GitHub / GitHub Enterprise 커밋/PR/리뷰 수집
+│   ├── gitlab.py         # GitLab 커밋/MR/노트 수집
+│   ├── bitbucket.py      # Bitbucket Cloud 커밋/PR/댓글 수집
+│   ├── __init__.py       # host_type 기반 git 수집기 라우팅 (GitDispatchCollector)
 │   ├── slack.py          # Slack 메시지 검색
 │   ├── jira.py           # Jira 이슈 활동 수집
 │   └── confluence.py     # Confluence 페이지 편집 수집

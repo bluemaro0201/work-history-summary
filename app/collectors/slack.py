@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from app.collectors.base import CollectorBase
+from app.collectors.base import PAGINATION_SAFETY_LIMIT, CollectorBase
 from app.collectors.git import extract_issue_key
 from app.config import settings
 
@@ -17,11 +17,11 @@ class SlackCollector(CollectorBase):
         activities: list[dict] = []
         async with httpx.AsyncClient(base_url="https://slack.com/api", headers=headers, timeout=settings.collector_timeout_seconds) as client:
             for channel in options.get("channels", []):
-                max_items = options.get("max_activities", settings.collector_max_activities_per_source)
+                # oldest/latest are filtered server-side, so pagination is naturally date-bounded.
                 cursor = None
                 channel_messages: list[dict] = []
-                while len(channel_messages) < max_items:
-                    params: dict = {"channel": channel, "oldest": str(start.timestamp()), "latest": str(end.timestamp()), "inclusive": "true", "limit": min(200, max_items - len(channel_messages))}
+                while len(channel_messages) < PAGINATION_SAFETY_LIMIT:
+                    params: dict = {"channel": channel, "oldest": str(start.timestamp()), "latest": str(end.timestamp()), "inclusive": "true", "limit": 200}
                     if cursor:
                         params["cursor"] = cursor
                     data = (await self.with_retry(lambda: client.get("/conversations.history", params=params))).json()
@@ -39,7 +39,7 @@ class SlackCollector(CollectorBase):
                         for reply in replies:
                             if _matches_user(reply, user_id, options):
                                 activities.append(_message_activity(channel, reply, thread_ts=msg["ts"]))
-        return activities[: options.get("max_activities", settings.collector_max_activities_per_source)]
+        return activities
 
 
 def _matches_user(msg: dict, user_id: str | None, options: dict) -> bool:

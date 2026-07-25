@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.collectors.base import CollectorBase
+from app.collectors.base import PAGINATION_SAFETY_LIMIT, CollectorBase
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class JiraCollector(CollectorBase):
                 data = resp.json()
                 page = data.get("issues", [])
                 issues.extend(page)
-                if len(page) < page_size or len(issues) >= options.get("max_activities", settings.collector_max_activities_per_source):
+                if len(page) < page_size or len(issues) >= PAGINATION_SAFETY_LIMIT:
                     break
                 start_at += len(page)
 
@@ -95,7 +95,7 @@ class JiraCollector(CollectorBase):
 
                 activities.extend(issue_activities)
 
-        return activities[: options.get("max_activities", settings.collector_max_activities_per_source)]
+        return activities
 
 
 def _parse_jira_dt(value: str | None) -> datetime | None:

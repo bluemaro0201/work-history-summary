@@ -1,14 +1,29 @@
 from __future__ import annotations
 
 import base64
+import re
 from datetime import datetime, timezone as dt_timezone
+from html import unescape
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.collectors.base import CollectorBase
+from app.collectors.base import PAGINATION_SAFETY_LIMIT, CollectorBase
 from app.collectors.git import extract_issue_key
 from app.config import settings
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_BLOCK_END_RE = re.compile(r"</(p|div|li|h[1-6]|tr|br)\s*>", re.IGNORECASE)
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+
+
+def _html_to_text(value: str) -> str:
+    """Confluence storage format is XHTML; strip tags/macros down to readable text."""
+    text = _BR_RE.sub("\n", value)
+    text = _BLOCK_END_RE.sub("\n", text)
+    text = _TAG_RE.sub("", text)
+    text = unescape(text)
+    return re.sub(r"[ \t]*\n[ \t]*\n+", "\n\n", text).strip()
 
 
 class ConfluenceCollector(CollectorBase):
@@ -52,7 +67,7 @@ class ConfluenceCollector(CollectorBase):
                     base_url_from_api = data.get("_links", {}).get("base", site_url).rstrip("/")
                 page_results = data.get("results", [])
                 pages.extend(page_results)
-                if len(page_results) < page_size or len(pages) >= options.get("max_activities", settings.collector_max_activities_per_source):
+                if len(page_results) < page_size or len(pages) >= PAGINATION_SAFETY_LIMIT:
                     break
                 offset += len(page_results)
 
@@ -67,7 +82,8 @@ class ConfluenceCollector(CollectorBase):
                 webui = page.get("_links", {}).get("webui", "")
                 url = (base_url_from_api or site_url) + webui
                 project = page.get("space", {}).get("key")
-                page_content = page.get("body", {}).get("storage", {}).get("value") if options.get("include_page_content", True) else title
+                raw_content = page.get("body", {}).get("storage", {}).get("value") if options.get("include_page_content", True) else None
+                page_content = _html_to_text(raw_content) if raw_content else title
 
                 # Case 1: I last modified this page within the date range
                 last_editor = page.get("version", {}).get("by", {}).get("accountId")
@@ -92,7 +108,8 @@ class ConfluenceCollector(CollectorBase):
                         comment_time = datetime.fromisoformat(comment_when.replace("Z", "+00:00")).astimezone(dt_timezone.utc)
                     if not (comment_time and start_utc <= comment_time < end_utc):
                         continue
-                    body_value = comment_body.get("value", "")
+                    raw_body = comment_body.get("value", "")
+                    body_value = _html_to_text(raw_body) if raw_body else raw_body
                     if account_id and comment_author == account_id:
                         activities.append({
                             "source": "confluence", "provider": "confluence",
@@ -102,7 +119,7 @@ class ConfluenceCollector(CollectorBase):
                             "url": url, "activity_ts": comment_when,
                             "metadata": {"page_id": page.get("id"), "comment_id": comment.get("id")},
                         })
-                    elif account_id and account_id in body_value:
+                    elif account_id and account_id in raw_body:
                         activities.append({
                             "source": "confluence", "provider": "confluence",
                             "activity_type": "mention",
@@ -112,4 +129,4 @@ class ConfluenceCollector(CollectorBase):
                             "metadata": {"page_id": page.get("id"), "comment_id": comment.get("id"), "mentioned_by": comment_author},
                         })
 
-        return activities[: options.get("max_activities", settings.collector_max_activities_per_source)]
+        return activities

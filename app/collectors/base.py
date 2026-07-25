@@ -8,6 +8,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+# Safety net against runaway pagination (e.g. a misbehaving API never returning has_more=false).
+# Not a user-facing limit — a single day's activity should never realistically approach this.
+PAGINATION_SAFETY_LIMIT = 3000
+
 
 @runtime_checkable
 class Collector(Protocol):
@@ -22,24 +26,6 @@ class CollectorBase:
         # Use next day 00:00:00 (exclusive) per PRD spec rather than 23:59:59.999999
         end_local = datetime.combine(local_date + timedelta(days=1), time.min, tzinfo=local_zone)
         return start_local.astimezone(dt_timezone.utc), end_local.astimezone(dt_timezone.utc)
-
-    async def fetch_all_pages(self, client: httpx.AsyncClient, url: str, params: dict, items_key: str, next_cursor_key: str | None = None, max_items: int = 500) -> list[dict]:
-        results: list[dict] = []
-        cursor = params.get("cursor")
-        while len(results) < max_items:
-            request_params = dict(params)
-            if cursor:
-                request_params["cursor"] = cursor
-            response = await self.with_retry(lambda: client.get(url, params=request_params))
-            data = response.json()
-            items = data if isinstance(data, list) else data.get(items_key, [])
-            results.extend(items)
-            if not next_cursor_key or isinstance(data, list):
-                break
-            cursor = data.get(next_cursor_key) or data.get("response_metadata", {}).get(next_cursor_key)
-            if not cursor:
-                break
-        return results[:max_items]
 
     async def with_retry(self, operation: Callable[[], Awaitable[httpx.Response]], max_retries: int = 3) -> httpx.Response:
         for attempt in range(max_retries + 1):
