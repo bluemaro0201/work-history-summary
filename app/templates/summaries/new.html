@@ -168,9 +168,7 @@
 
       const data = await res.json();
       collectedActivities = data.activities || [];
-      document.getElementById('select-status').textContent = (data.source_status || [])
-        .map(s => `${s.label}(${s.source}): ${s.status}${s.count != null ? ` ${s.count}건` : ''}`)
-        .join(' | ');
+      document.getElementById('select-status').innerHTML = renderSourceStatus(data.source_status || []);
 
       renderActivityList();
       document.getElementById('loading-section').classList.add('hidden');
@@ -180,6 +178,29 @@
       document.getElementById('form-section').classList.remove('hidden');
       errorEl.textContent = '오류: ' + err.message; errorEl.classList.remove('hidden');
     }
+  }
+
+  const STATUS_LABELS = { no_token: '토큰 없음', timeout: '시간 초과', failed: '수집 실패', not_found: '설정 없음' };
+
+  function renderSourceStatus(statusList) {
+    const ok = statusList.filter(s => s.status === 'success');
+    const bad = statusList.filter(s => s.status !== 'success');
+
+    const okText = ok.map(s => `${esc(s.label)}(${esc(s.source)}): ${s.count ?? 0}건`).join(' · ');
+    if (!bad.length) {
+      return okText ? `<span class="text-gray-400">${okText}</span>` : '';
+    }
+
+    const badHtml = bad.map(s => {
+      const reason = STATUS_LABELS[s.status] || s.status;
+      const detail = s.error ? `: ${esc(s.error)}` : '';
+      return `<div>⚠ ${esc(s.label)}(${esc(s.source)}) — ${esc(reason)}${detail}</div>`;
+    }).join('');
+
+    return `
+      <div class="text-red-600 bg-red-50 border border-red-200 rounded p-2 space-y-0.5 mb-1">${badHtml}</div>
+      ${okText ? `<span class="text-gray-400">${okText}</span>` : ''}
+    `;
   }
 
   function renderActivityList() {
