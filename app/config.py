@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_debug: bool = True
 
     collector_timeout_seconds: int = 30
+    providers_file: str = "data/providers.json"
 
 
 # Module-level singleton — used by collectors for timeout.

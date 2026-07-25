@@ -2,7 +2,9 @@ import json
 import uuid
 from pathlib import Path
 
-PROVIDERS_FILE = Path("providers.json")
+from app.config import settings
+
+PROVIDERS_FILE = Path(settings.providers_file)
 
 SOURCES = ("git", "slack", "jira", "confluence")
 
@@ -17,6 +19,7 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
+    PROVIDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     PROVIDERS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

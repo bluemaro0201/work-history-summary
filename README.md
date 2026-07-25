@@ -5,7 +5,7 @@
 Git(GitHub / GitHub Enterprise / GitLab / Bitbucket Cloud), Slack, Jira, Confluence에서 하루 활동을 수집하고, Claude / ChatGPT에 붙여넣을 수 있는 프롬프트를 생성합니다.
 
 - AI API 키 불필요 — 프롬프트 생성까지만 담당
-- DB 불필요 — 토큰은 로컬 `providers.json`에 저장
+- DB 불필요 — 토큰은 로컬 `data/providers.json`에 저장
 - 여러 계정 지원 — GitHub 계정, Jira 인스턴스 등 복수 추가 가능
 
 ---
@@ -147,7 +147,7 @@ open http://localhost:8000
 docker compose up
 ```
 
-`providers.json`이 없으면 자동 생성됩니다. 컨테이너를 재시작해도 토큰 설정이 유지됩니다.
+`./data` 디렉터리를 컨테이너의 `/app/data`에 그대로 마운트하는 구조라, 로컬에 `data/providers.json`이 없어도 최초 토큰 등록 시 자동 생성되고 컨테이너를 재시작/재빌드해도 유지됩니다. (참고: 과거 버전은 `providers.json` 파일 자체를 마운트했는데, 호스트에 파일이 없으면 Docker가 그 경로를 디렉터리로 잘못 생성해버리는 문제가 있어 디렉터리 마운트 방식으로 변경했습니다.)
 
 포트 등을 바꾸고 싶다면 `.env` 파일을 만들어 덮어쓸 수 있습니다.
 
@@ -179,9 +179,9 @@ app/
 │   ├── summaries/new.html  # 수집 메인 화면
 │   └── settings.html       # 토큰 설정 화면
 ├── config.py             # 앱 설정
-├── providers.py          # providers.json CRUD
+├── providers.py          # data/providers.json CRUD
 └── main.py               # FastAPI 앱 진입점
-providers.json            # 토큰 저장소 (자동 생성, .gitignore)
+data/providers.json       # 토큰 저장소 (자동 생성, .gitignore)
 ```
 
 ---

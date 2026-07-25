@@ -5,7 +5,7 @@ description: Collect the user's daily work activity from configured Git/Slack/Ji
 
 ## Prerequisites (check these first)
 
-1. `providers.json` must exist in the repo root with at least one provider token. If it doesn't exist, tell the user to run the web UI once and configure tokens there — don't ask them to paste tokens into this conversation. Either works:
+1. `data/providers.json` must exist with at least one provider token. If it doesn't exist, tell the user to run the web UI once and configure tokens there — don't ask them to paste tokens into this conversation. Either works:
    - Python: `poetry run uvicorn app.main:app --reload`
    - Docker: `docker compose up`
 
