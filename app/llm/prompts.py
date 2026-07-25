@@ -39,6 +39,7 @@ def build_user_message(date: str, timezone: str, activities: list[dict]) -> str:
         "slack": "Slack",
         "jira": "Jira",
         "confluence": "Confluence",
+        "manual": "수동 추가",
     }
 
     lines = [

@@ -49,11 +49,21 @@
       <div class="flex justify-between items-center">
         <span class="font-medium">수집된 활동 중 프롬프트에 포함할 항목을 선택하세요 (<span id="select-count"></span>)</span>
         <div class="flex gap-3">
+          <button onclick="toggleManualForm()" class="text-xs text-blue-600 hover:underline">+ 수동으로 항목 추가</button>
           <button onclick="toggleAll(true)" class="text-xs text-blue-600 hover:underline">전체 선택</button>
           <button onclick="toggleAll(false)" class="text-xs text-gray-500 hover:underline">전체 해제</button>
         </div>
       </div>
       <p id="select-status" class="text-xs text-gray-400 mt-1"></p>
+    </div>
+    <div id="manual-form" class="hidden border rounded p-3 bg-gray-50 space-y-2">
+      <div class="grid grid-cols-2 gap-2">
+        <input id="manual-title" type="text" placeholder="제목" class="border p-2 rounded text-sm">
+        <input id="manual-issue-key" type="text" placeholder="이슈 키 (선택)" class="border p-2 rounded text-sm">
+      </div>
+      <textarea id="manual-content" placeholder="내용" rows="2" class="border p-2 rounded text-sm w-full"></textarea>
+      <input id="manual-url" type="text" placeholder="URL (선택)" class="border p-2 rounded text-sm w-full">
+      <button onclick="addManualActivity()" class="text-sm bg-gray-700 text-white px-3 py-1.5 rounded hover:bg-gray-800">목록에 추가</button>
     </div>
     <div id="activity-list" class="space-y-4 max-h-[28rem] overflow-y-auto"></div>
     <div class="flex items-center gap-3 pt-3 border-t">
@@ -127,7 +137,7 @@
       : '<p class="text-sm text-gray-400">설정된 계정이 없습니다. <a href="/settings" class="text-blue-500 hover:underline">토큰 설정</a>에서 추가해주세요.</p>';
   }
 
-  const ACT_SRC_LABELS = { git: 'Git', slack: 'Slack', jira: 'Jira', confluence: 'Confluence' };
+  const ACT_SRC_LABELS = { git: 'Git', slack: 'Slack', jira: 'Jira', confluence: 'Confluence', manual: '수동 추가' };
 
   async function collect() {
     const errorEl = document.getElementById('form-error');
@@ -173,6 +183,12 @@
   }
 
   function renderActivityList() {
+    // Preserve existing checkbox states across re-renders (e.g. after a manual add);
+    // items that weren't rendered before default to checked.
+    const existingBoxes = [...document.querySelectorAll('.activity-check')];
+    const prevIdx = new Set(existingBoxes.map(el => Number(el.dataset.idx)));
+    const prevChecked = new Set(existingBoxes.filter(el => el.checked).map(el => Number(el.dataset.idx)));
+
     const bySource = {};
     collectedActivities.forEach((a, idx) => { (bySource[a.source] ||= []).push({ ...a, _idx: idx }); });
 
@@ -180,14 +196,17 @@
       <div>
         <p class="text-xs font-semibold text-gray-500 mb-1.5">${esc(ACT_SRC_LABELS[src] || src)} (${items.length}건)</p>
         <div class="space-y-1">
-          ${items.map(a => `
+          ${items.map(a => {
+            const isChecked = prevIdx.has(a._idx) ? prevChecked.has(a._idx) : true;
+            return `
             <label class="flex items-start gap-2 text-sm border rounded p-2 cursor-pointer hover:bg-gray-50">
-              <input type="checkbox" class="activity-check mt-0.5" data-idx="${a._idx}" checked onchange="updateSelectCount()">
+              <input type="checkbox" class="activity-check mt-0.5" data-idx="${a._idx}" ${isChecked ? 'checked' : ''} onchange="updateSelectCount()">
               <span class="min-w-0">
                 <span class="font-medium">${a.issue_key ? `[${esc(a.issue_key)}] ` : ''}${esc(a.title || '(내용 없음)')}</span>
                 <span class="text-gray-400 text-xs block">${esc(a.activity_type || '')}${a.activity_ts ? ' · ' + esc(String(a.activity_ts).replace('T', ' ').slice(0, 16)) : ''}${a.project ? ' · ' + esc(a.project) : ''}</span>
               </span>
-            </label>`).join('')}
+            </label>`;
+          }).join('')}
         </div>
       </div>`).join('');
 
@@ -198,6 +217,32 @@
   function toggleAll(checked) {
     document.querySelectorAll('.activity-check').forEach(el => el.checked = checked);
     updateSelectCount();
+  }
+
+  function toggleManualForm() {
+    document.getElementById('manual-form').classList.toggle('hidden');
+  }
+
+  function addManualActivity() {
+    const title = document.getElementById('manual-title').value.trim();
+    const content = document.getElementById('manual-content').value.trim();
+    const issueKey = document.getElementById('manual-issue-key').value.trim();
+    const url = document.getElementById('manual-url').value.trim();
+    if (!title && !content) { alert('제목 또는 내용을 입력해주세요.'); return; }
+
+    collectedActivities.push({
+      source: 'manual', provider: 'manual', activity_type: 'manual_note',
+      title: title || content.slice(0, 80), content,
+      issue_key: issueKey || null, url: url || null,
+      activity_ts: new Date().toISOString(), project: null, metadata: {},
+    });
+
+    document.getElementById('manual-title').value = '';
+    document.getElementById('manual-content').value = '';
+    document.getElementById('manual-issue-key').value = '';
+    document.getElementById('manual-url').value = '';
+
+    renderActivityList();
   }
 
   function updateSelectCount() {
